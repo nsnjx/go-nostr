@@ -45,6 +45,10 @@ type Group struct {
 	Private bool
 	Closed  bool
 
+	// Subscription related fields
+	SubscriptionAmount int64                      // Amount in satoshis for paid subscription
+	MemberExpiryTimes  map[string]nostr.Timestamp // Member subscription expiry times
+
 	Roles []*Role
 
 	LastMetadataUpdate nostr.Timestamp
@@ -101,9 +105,11 @@ func NewGroup(gadstr string) (Group, error) {
 	}
 
 	return Group{
-		Address: gad,
-		Name:    gad.ID,
-		Members: make(map[string][]*Role),
+		Address:            gad,
+		Name:               gad.ID,
+		Members:            make(map[string][]*Role),
+		MemberExpiryTimes:  make(map[string]nostr.Timestamp),
+		SubscriptionAmount: 0, // Default to free
 	}, nil
 }
 
@@ -113,8 +119,10 @@ func NewGroupFromMetadataEvent(relayURL string, evt *nostr.Event) (Group, error)
 			Relay: relayURL,
 			ID:    evt.Tags.GetD(),
 		},
-		Name:    evt.Tags.GetD(),
-		Members: make(map[string][]*Role),
+		Name:               evt.Tags.GetD(),
+		Members:            make(map[string][]*Role),
+		MemberExpiryTimes:  make(map[string]nostr.Timestamp),
+		SubscriptionAmount: 0, // Default to free
 	}
 
 	err := g.MergeInMetadataEvent(evt)
@@ -137,6 +145,11 @@ func (group Group) ToMetadataEvent() *nostr.Event {
 	}
 	if group.Picture != "" {
 		evt.Tags = append(evt.Tags, nostr.Tag{"picture", group.Picture})
+	}
+
+	// Add subscription amount if it's a paid group
+	if group.SubscriptionAmount > 0 {
+		evt.Tags = append(evt.Tags, nostr.Tag{"subscription_amount", fmt.Sprintf("%d", group.SubscriptionAmount)})
 	}
 
 	// status
@@ -234,6 +247,14 @@ func (group *Group) MergeInMetadataEvent(evt *nostr.Event) error {
 		group.Picture = (*tag)[1]
 	}
 
+	// Parse subscription amount
+	if tag := evt.Tags.GetFirst([]string{"subscription_amount", ""}); tag != nil {
+		if amount, err := fmt.Sscanf((*tag)[1], "%d", &group.SubscriptionAmount); err != nil || amount != 1 {
+			// If parsing fails, keep the default value (0)
+			group.SubscriptionAmount = 0
+		}
+	}
+
 	if tag := evt.Tags.GetFirst([]string{"private"}); tag != nil {
 		group.Private = true
 	}
@@ -299,4 +320,56 @@ func (group *Group) MergeInMembersEvent(evt *nostr.Event) error {
 	}
 
 	return nil
+}
+
+// SetMemberExpiryTime sets the subscription expiry time for a specific member
+func (group *Group) SetMemberExpiryTime(memberPubkey string, expiryTime nostr.Timestamp) {
+	group.MemberExpiryTimes[memberPubkey] = expiryTime
+}
+
+// GetMemberExpiryTime gets the subscription expiry time for a specific member
+func (group *Group) GetMemberExpiryTime(memberPubkey string) (nostr.Timestamp, bool) {
+	expiryTime, exists := group.MemberExpiryTimes[memberPubkey]
+	return expiryTime, exists
+}
+
+// IsMemberSubscriptionValid checks if a member's subscription is still valid
+func (group *Group) IsMemberSubscriptionValid(memberPubkey string) bool {
+	if group.SubscriptionAmount == 0 {
+		// Free group, all members have valid access
+		return true
+	}
+
+	expiryTime, exists := group.MemberExpiryTimes[memberPubkey]
+	if !exists {
+		// Member has no expiry time set, consider as invalid
+		return false
+	}
+
+	// Check if subscription has expired
+	return expiryTime > nostr.Now()
+}
+
+// RemoveMemberExpiryTime removes the subscription expiry time for a specific member
+func (group *Group) RemoveMemberExpiryTime(memberPubkey string) {
+	delete(group.MemberExpiryTimes, memberPubkey)
+}
+
+// GetExpiredMembers returns a list of members whose subscriptions have expired
+func (group *Group) GetExpiredMembers() []string {
+	if group.SubscriptionAmount == 0 {
+		// Free group, no expired members
+		return []string{}
+	}
+
+	var expiredMembers []string
+	now := nostr.Now()
+
+	for member, expiryTime := range group.MemberExpiryTimes {
+		if expiryTime <= now {
+			expiredMembers = append(expiredMembers, member)
+		}
+	}
+
+	return expiredMembers
 }
