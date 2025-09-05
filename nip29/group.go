@@ -48,6 +48,7 @@ type Group struct {
 	// Subscription related fields
 	SubscriptionAmount int64                      // Amount in satoshis for paid subscription
 	MemberExpiryTimes  map[string]nostr.Timestamp // Member subscription expiry times
+	GroupWalletID      string                     // LNbits wallet ID for group payments
 
 	Roles []*Role
 
