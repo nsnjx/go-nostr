@@ -153,6 +153,11 @@ func (group Group) ToMetadataEvent() *nostr.Event {
 		evt.Tags = append(evt.Tags, nostr.Tag{"subscription_amount", fmt.Sprintf("%d", group.SubscriptionAmount)})
 	}
 
+	// Add group wallet ID if it's set
+	if group.GroupWalletID != "" {
+		evt.Tags = append(evt.Tags, nostr.Tag{"group_wallet_id", group.GroupWalletID})
+	}
+
 	// status
 	if group.Private {
 		evt.Tags = append(evt.Tags, nostr.Tag{"private"})
