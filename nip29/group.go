@@ -210,7 +210,14 @@ func (group Group) ToMembersEvent() *nostr.Event {
 
 	for member := range group.Members {
 		// include both admins and normal members
-		evt.Tags = append(evt.Tags, nostr.Tag{"p", member})
+		tag := nostr.Tag{"p", member}
+
+		// Add MemberExpiryTime if it exists for this member
+		if expiryTime, exists := group.MemberExpiryTimes[member]; exists {
+			tag = append(tag, fmt.Sprintf("%d", expiryTime))
+		}
+
+		evt.Tags = append(evt.Tags, tag)
 	}
 
 	return evt
